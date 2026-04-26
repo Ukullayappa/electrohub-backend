@@ -1,8 +1,5 @@
 const { Pool } = require('pg');
 require('dotenv').config();
-
-// Render.com provides a DATABASE_URL environment variable for PostgreSQL
-// It requires SSL in production
 const isProduction = process.env.NODE_ENV === 'production';
 
 const pool = process.env.DATABASE_URL
@@ -25,7 +22,7 @@ const pool = process.env.DATABASE_URL
     });
 
 pool.on('connect', () => {
-  console.log('✅ Connected to PostgreSQL database');
+  console.log(' Connected to PostgreSQL database');
 });
 
 pool.on('error', (err) => {
