@@ -1,7 +1,4 @@
--- Electronics Store Database Schema
--- Run this file to create all tables and seed data
 
--- Drop tables if exist (for clean setup)
 DROP TABLE IF EXISTS order_items CASCADE;
 DROP TABLE IF EXISTS orders CASCADE;
 DROP TABLE IF EXISTS cart_items CASCADE;
@@ -139,9 +136,6 @@ CREATE INDEX idx_cart_user ON cart_items(user_id);
 CREATE INDEX idx_orders_user ON orders(user_id);
 CREATE INDEX idx_reviews_product ON reviews(product_id);
 
--- =====================
--- SEED DATA
--- =====================
 
 -- Admin user (password: Admin@123)
 INSERT INTO users (name, email, password, role) VALUES
