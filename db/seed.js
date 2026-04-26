@@ -1,10 +1,3 @@
-/**
- * ElectroHub — Database Seed Script
- * Run once after deploying to Render:
- *   node db/seed.js
- *
- * It reads DATABASE_URL from env (Render injects it automatically).
- */
 
 require('dotenv').config();
 const { Pool } = require('pg');
@@ -23,9 +16,9 @@ const pool = process.env.DATABASE_URL
 async function seed() {
   const client = await pool.connect();
   try {
-    console.log('🌱 Starting database seed...\n');
+    console.log(' Starting database seed...\n');
 
-    // ── DROP & RECREATE ────────────────────────────────────────────────────
+    //  DROP & RECREATE
     await client.query(`
       DROP TABLE IF EXISTS order_items   CASCADE;
       DROP TABLE IF EXISTS orders        CASCADE;
@@ -38,7 +31,7 @@ async function seed() {
     `);
     console.log('✓ Old tables dropped');
 
-    // ── SCHEMA ────────────────────────────────────────────────────────────
+    // SCHEMA 
     await client.query(`
       CREATE TABLE users (
         id            SERIAL PRIMARY KEY,
@@ -163,7 +156,7 @@ async function seed() {
     `);
     console.log('✓ Schema created');
 
-    // ── USERS ─────────────────────────────────────────────────────────────
+    //  USERS 
     const adminHash = await bcrypt.hash('Admin@123', 10);
     const userHash  = await bcrypt.hash('User@123',  10);
 
@@ -175,7 +168,7 @@ async function seed() {
     `, [adminHash, userHash]);
     console.log('✓ Users seeded  (admin: Admin@123 | users: User@123)');
 
-    // ── CATEGORIES ────────────────────────────────────────────────────────
+    //  CATEGORIES
     await client.query(`
       INSERT INTO categories (name, slug, description, icon, image) VALUES
         ('Smartphones',  'smartphones',  'Latest smartphones & mobile devices',         'bi-phone',       'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400'),
@@ -189,7 +182,7 @@ async function seed() {
     `);
     console.log('✓ Categories seeded');
 
-    // ── PRODUCTS ──────────────────────────────────────────────────────────
+    //  PRODUCTS 
     const products = [
       /* ── Smartphones ── */
       {
@@ -429,7 +422,7 @@ async function seed() {
     }
     console.log(`✓ ${products.length} products seeded`);
 
-    // ── TRIGGER: auto-update rating ───────────────────────────────────────
+    //  TRIGGER: auto-update rating 
     await client.query(`
       CREATE OR REPLACE FUNCTION update_product_rating()
       RETURNS TRIGGER AS $$
