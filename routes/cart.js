@@ -1,114 +1,169 @@
-const express = require('express');
-const router = express.Router();
-const pool = require('../db/pool');
-const { authenticate } = require('../middleware/auth');
+import express from "express";
+import pool from "../db/pool.js";
+import { isLoggedIn } from "../middleware/auth.js";
 
-// @GET /api/cart
-router.get('/', authenticate, async (req, res) => {
+const router = express.Router();
+
+// ── GET CART ───────────────────────────────────────────────
+// GET /api/cart
+
+
+router.get("/", isLoggedIn, async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT ci.id, ci.quantity, ci.product_id,
-             p.name, p.slug, p.price, p.original_price, p.discount_percent,
-             p.images, p.brand, p.stock, p.rating
-      FROM cart_items ci
-      JOIN products p ON ci.product_id = p.id
-      WHERE ci.user_id = $1
-      ORDER BY ci.created_at DESC
-    `, [req.user.id]);
+    const result = await pool.query(
+      `SELECT
+         ci.id,
+         ci.quantity,
+         ci.product_id,
+         p.name,
+         p.slug,
+         p.price,
+         p.original_price,
+         p.discount_percent,
+         p.images,
+         p.brand,
+         p.stock,
+         p.rating
+       FROM cart_items ci
+       JOIN products p ON ci.product_id = p.id
+       WHERE ci.user_id = $1
+       ORDER BY ci.created_at DESC`,
+      [req.user.id]
+    );
 
     const items = result.rows;
-    const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
+    // Calculate the total price of everything in the cart
+    const subtotal = items.reduce(
+      (total, item) => total + item.price * item.quantity,
+      0
+    );
 
     res.json({ success: true, items, subtotal });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error("Get cart error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-// @POST /api/cart
-router.post('/', authenticate, async (req, res) => {
+// ── GET CART COUNT ─────────────────────────────────────────
+// GET /api/cart/count
+// Just returns the number of items — useful for the cart badge in the UI
+
+router.get("/count", isLoggedIn, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT COALESCE(SUM(quantity), 0) AS count FROM cart_items WHERE user_id = $1",
+      [req.user.id]
+    );
+
+    res.json({ success: true, count: parseInt(result.rows[0].count) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ── ADD TO CART ────────────────────────────────────────────
+// POST /api/cart
+// Body: { productId, quantity }
+// If the product is already in cart → increase quantity
+// If it's new → add it fresh
+
+router.post("/", isLoggedIn, async (req, res) => {
   try {
     const { productId, quantity = 1 } = req.body;
 
-    // Check product exists and has stock
-    const productCheck = await pool.query('SELECT id, stock, price FROM products WHERE id = $1', [productId]);
-    if (productCheck.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Product not found' });
-    }
-    if (productCheck.rows[0].stock < quantity) {
-      return res.status(400).json({ success: false, message: 'Insufficient stock' });
+    // Check if the product exists and has enough stock
+    const productResult = await pool.query(
+      "SELECT id, stock FROM products WHERE id = $1",
+      [productId]
+    );
+
+    if (productResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Product not found" });
     }
 
-    // Insert or update
-    const result = await pool.query(`
-      INSERT INTO cart_items (user_id, product_id, quantity)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (user_id, product_id)
-      DO UPDATE SET quantity = cart_items.quantity + $3, updated_at = NOW()
-      RETURNING *
-    `, [req.user.id, productId, quantity]);
+    if (productResult.rows[0].stock < quantity) {
+      return res.status(400).json({ success: false, message: "Not enough stock available" });
+    }
 
-    res.status(201).json({ success: true, message: 'Added to cart', item: result.rows[0] });
+    // INSERT ... ON CONFLICT means:
+    // "If this user already has this product in their cart,
+    //  don't add a second row — just increase the quantity"
+    const result = await pool.query(
+      `INSERT INTO cart_items (user_id, product_id, quantity)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, product_id)
+       DO UPDATE SET quantity = cart_items.quantity + $3, updated_at = NOW()
+       RETURNING *`,
+      [req.user.id, productId, quantity]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Added to cart",
+      item: result.rows[0],
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error("Add to cart error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-// @PUT /api/cart/:id
-router.put('/:id', authenticate, async (req, res) => {
+// ── UPDATE QUANTITY ────────────────────────────────────────
+router.put("/:id", isLoggedIn, async (req, res) => {
   try {
     const { quantity } = req.body;
 
-    if (quantity < 1) {
-      return res.status(400).json({ success: false, message: 'Quantity must be at least 1' });
+    if (!quantity || quantity < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Quantity must be 1 or more",
+      });
     }
 
+    // We also check user_id so users can't edit other people's carts
     const result = await pool.query(
-      'UPDATE cart_items SET quantity=$1, updated_at=NOW() WHERE id=$2 AND user_id=$3 RETURNING *',
+      "UPDATE cart_items SET quantity=$1, updated_at=NOW() WHERE id=$2 AND user_id=$3 RETURNING *",
       [quantity, req.params.id, req.user.id]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Cart item not found' });
+      return res.status(404).json({ success: false, message: "Cart item not found" });
     }
 
-    res.json({ success: true, message: 'Cart updated', item: result.rows[0] });
+    res.json({ success: true, message: "Cart updated", item: result.rows[0] });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-// @DELETE /api/cart/:id
-router.delete('/:id', authenticate, async (req, res) => {
-  try {
-    await pool.query('DELETE FROM cart_items WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
-    res.json({ success: true, message: 'Item removed from cart' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
+// ── REMOVE ONE ITEM ────────────────────────────────────────
+// DELETE /api/cart/:id
 
-// @DELETE /api/cart - Clear cart
-router.delete('/', authenticate, async (req, res) => {
+router.delete("/:id", isLoggedIn, async (req, res) => {
   try {
-    await pool.query('DELETE FROM cart_items WHERE user_id=$1', [req.user.id]);
-    res.json({ success: true, message: 'Cart cleared' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
-
-// @GET /api/cart/count
-router.get('/count', authenticate, async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT COALESCE(SUM(quantity), 0) as count FROM cart_items WHERE user_id=$1',
-      [req.user.id]
+    await pool.query(
+      "DELETE FROM cart_items WHERE id=$1 AND user_id=$2",
+      [req.params.id, req.user.id]
     );
-    res.json({ success: true, count: parseInt(result.rows[0].count) });
+    res.json({ success: true, message: "Item removed from cart" });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-module.exports = router;
+// ── CLEAR ENTIRE CART ──────────────────────────────────────
+// DELETE /api/cart
+// Removes ALL items from the user's cart (used after checkout)
+
+router.delete("/", isLoggedIn, async (req, res) => {
+  try {
+    await pool.query("DELETE FROM cart_items WHERE user_id=$1", [req.user.id]);
+    res.json({ success: true, message: "Cart cleared" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+export default router;
